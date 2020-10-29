@@ -457,9 +457,9 @@ def aircraft(neofly: str, source: str) -> None:
 )
 @click.option(
     "--starter",
-    help="Select your starting fleet: XCub, C152, or a mix",
+    help="Select your starting fleet: XCub, C152, C172, or a mix. 'mixap' will give a mix with only autopilots.",
     required=False,
-    default="XCub"
+    default="mixap"
 )
 def globalsandbox(neofly:str, career:str, starter:str) -> None:
     """Will place a starting aircraft in each top-letter ICAO defined region.
@@ -474,8 +474,11 @@ def globalsandbox(neofly:str, career:str, starter:str) -> None:
             cur.execute(f"SELECT ident FROM airport WHERE ident LIKE '{r}___%'")
             airports = cur.fetchall()
             target_airport = random.choice(airports)[0]
+            insert_c172_g1000 = ('INSERT INTO "main"."hangar" ("Aircraft", "Type", "Engines", "Qualification", "MaxPayloadlbs", "Pax", "Cost", "Rangenm", "Location", "statusEngine", "statusHull", "airframe", "currentFuel", "owner", "status")'
+                                 f"SELECT 'Cessna Skyhawk G1000', 'prop', '1', 'A', '867', '3', '0', '640', '{target_airport}', '100', '100', '0', '0', id, '0'"
+                                 f'FROM career WHERE name="{career}"')
             insert_xcub = ('INSERT INTO "main"."hangar" ("Aircraft", "Type", "Engines", "Qualification", "MaxPayloadlbs", "Pax", "Cost", "Rangenm", "Location", "statusEngine", "statusHull", "airframe", "currentFuel", "owner", "status") '
-                           f"SELECT 'XCub', 'prop', '1', 'A', '1084', '1', '0', '695', '{target_airport}', '94.3799999999995', '0', '0', '0', id, '0'"
+                           f"SELECT 'XCub', 'prop', '1', 'A', '1084', '1', '0', '695', '{target_airport}', '100', '100', '0', '0', id, '0'"
                            f'FROM career WHERE name="{career}"')
             insert_c152 = ('INSERT INTO "main"."hangar" ("Aircraft", "Type", "Engines", "Qualification", "MaxPayloadlbs", "Pax", "Cost", "Rangenm", "Location", "statusEngine", "statusHull", "airframe", "currentFuel", "owner", "status") '
                            f"SELECT 'Cessna 152', 'prop', '1', 'A', '589', '1', '0', '415', '{target_airport}', '100', '100', '0', '0', id, '0' "
@@ -483,14 +486,63 @@ def globalsandbox(neofly:str, career:str, starter:str) -> None:
             if starter.lower() == 'xcub':
                 logging.debug(insert_xcub)
                 cur.execute(insert_xcub)
+            elif starter.lower() == 'c172':
+                logging.debug(insert_c172_g1000)
+                cur.execute(insert_c172_g1000)
             elif starter.lower() == "c152":
                 logging.debug(insert_c152)
                 cur.execute(insert_c152)
+            elif starter.lower() == "mixap":
+                cur.execute(random.choice([insert_xcub, insert_c172_g1000]))
             else:
-                cur.execute(random.choice([insert_c152, insert_xcub]))
+                cur.execute(random.choice([insert_c152, insert_xcub, insert_c172_g1000]))
         conn.commit()
         logging.info("Done.")
     return
+
+@main.command
+@click.option(
+    "--neofly",
+    help="path to neofly database",
+    default=os.path.expandvars("%PROGRAMDATA%\\NeoFly\common.db"),
+)
+@click.option("--include_hires",
+    help="Also clear airports hires have departed from",
+    default=False)
+def neverlookback(neofly: str, include_hires: bool) -> None:
+    """Will remove all airports that have been departed from by the career.
+
+    Optionally, also remove all airports departed from by hires.
+
+    Never visit the same airport twice!
+    """
+    if not os.path.exists(neofly):
+        raise Exception(f"Unable to find neofly data at '{neofly}")
+    with sqlite3.connect(neofly) as conn:
+        departures=[]
+        logging.info("Deleting airports were successful departures have taken place")
+        cur = conn.cursor()
+        # Get successful missions
+        cur.execute("SELECT DISTINCT fp FROM log WHERE result LIKE 'Success%'")
+        for fpl in cur:
+            # Parse to get the departure code
+            departures.append(fpl[0].split('>')[0])
+
+        if include_hires:
+            cur.execute("SELECT DISTINCT departure FROM rentJob")
+            for d in cur:
+                departures.append(d[0])
+
+        for d in departures:
+            cur.execute(f'DELETE FROM airport WHERE ident="{d}"')
+        conn.commit()
+
+
+    #clean_impossible_missions(neofly)
+    #move_impossible_aircraft(neofly)
+    logging.info("Done")
+    return
+
 
 def make_qs(listname: list) -> str:
     """Create a list of '?'s for use in a query string.
